@@ -168,12 +168,16 @@ sudo chown -R $USER:$USER /opt/affiliate-automation
 # Create necessary directories
 mkdir -p data/postgres
 mkdir -p data/redis
-mkdir -p data/minio
 mkdir -p data/qdrant
 mkdir -p data/n8n
 mkdir -p data/grafana
 mkdir -p data/prometheus
 mkdir -p data/loki
+mkdir -p data/ollama
+mkdir -p data/open-webui
+mkdir -p data/uptime-kuma
+mkdir -p data/portainer
+mkdir -p data/traefik
 mkdir -p logs
 mkdir -p uploads
 mkdir -p videos
@@ -190,7 +194,7 @@ sudo chown -R 1000:1000 logs/
 sudo chown -R 1000:1000 uploads/
 sudo chown -R 1000:1000 videos/
 sudo chown -R 1000:1000 thumbnails/
-sudo cown -R 1000:1000 subtitles/
+sudo chown -R 1000:1000 subtitles/
 ```
 
 ## 🔐 Step 4: Environment Configuration
@@ -222,10 +226,6 @@ POSTGRES_PASSWORD=your_secure_password_here
 
 # Redis
 REDIS_PASSWORD=your_redis_password_here
-
-# MinIO
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=your_minio_password_here
 
 # API Keys
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -310,22 +310,6 @@ docker exec -it affiliate-automation-postgres psql -U affiliate_user -d affiliat
 # Test Redis connection
 docker exec -it affiliate-automation-redis redis-cli -a your_redis_password ping
 # Expected response: PONG
-```
-
-### Configure MinIO
-
-```bash
-# Access MinIO Console
-# URL: http://your-server-ip:9001
-# Username: minioadmin
-# Password: your_minio_password_here
-
-# Create buckets:
-# - raw-videos
-# - rendered-videos
-# - subtitles
-# - thumbnails
-# - audio
 ```
 
 ### Configure n8n

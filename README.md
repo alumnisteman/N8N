@@ -131,8 +131,6 @@ Dashboard menampilkan:
 ## 📖 Dokumentasi
 
 - [Installation Guide](docs/01-INSTALLATION.md) - Panduan instalasi dan setup awal
-- [Docker Configuration](docs/02-DOCKER-COMPOSE.md) - Konfigurasi Docker Compose
-- [Environment Setup](docs/03-ENVIRONMENT.md) - Konfigurasi environment variables
 - [API Service](docs/04-API-SERVICE.md) - Setup dan dokumentasi API FastAPI
 - [Worker Configuration](docs/05-WORKERS.md) - Konfigurasi worker (AI, Render, Upload)
 - [n8n Workflows](docs/06-N8N-WORKFLOWS.md) - Konfigurasi workflow n8n
