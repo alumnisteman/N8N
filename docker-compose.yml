@@ -1,0 +1,522 @@
+version: '3.8'
+
+services:
+  # ==================== TRAEFIK / REVERSE PROXY ====================
+  traefik:
+    image: traefik:v3.0
+    container_name: affiliate-traefik
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/traefik/letsencrypt:/letsencrypt
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.routers.api.service=api@internal"
+
+  # ==================== PORTAINER ====================
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: affiliate-portainer
+    restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "3000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/portainer:/data
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${DOMAIN}`)"
+      - "traefik.http.routers.portainer.tls=true"
+      - "traefik.http.routers.portainer.tls.certresolver=myresolver"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+
+  # ==================== WATCHTOWER ====================
+  watchtower:
+    image: containrrr/watchtower
+    container_name: affiliate-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400
+      - WATCHTOWER_LABEL_ENABLE=true
+    networks:
+      - affiliate-network
+
+  # ==================== N8N ====================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: affiliate-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_HOST=${N8N_HOST}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_PASSWORD=${REDIS_PASSWORD}
+      - EXECUTIONS_MODE=queue
+      - EXECUTIONS_PROCESS=main
+      - EXECUTIONS_TIMEOUT=3600
+      - EXECUTIONS_TIMEOUT_MAX=7200
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+      - ./data/n8n/files:/files
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.${DOMAIN}`)"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+
+  # ==================== POSTGRESQL ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: affiliate-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - affiliate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== REDIS ====================
+  redis:
+    image: redis:7-alpine
+    container_name: affiliate-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - affiliate-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ==================== FASTAPI ====================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: affiliate-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY}
+      - SHOPEE_API_KEY=${SHOPEE_API_KEY}
+      - TIKTOK_SHOP_API_KEY=${TIKTOK_SHOP_API_KEY}
+      - TOKOPEDIA_API_KEY=${TOKOPEDIA_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENVIRONMENT=${ENVIRONMENT}
+    volumes:
+      - ./api:/app
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+
+  # ==================== WORKER AI ====================
+  worker-ai:
+    build:
+      context: ./workers/ai
+      dockerfile: Dockerfile
+    container_name: affiliate-worker-ai
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - QDRANT_URL=http://qdrant:6333
+      - WORKER_TYPE=ai
+      - MAX_CONCURRENT_JOBS=3
+    volumes:
+      - ./workers/ai:/app
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+    networks:
+      - affiliate-network
+    deploy:
+      replicas: 2
+
+  # ==================== WORKER RENDER ====================
+  worker-render:
+    build:
+      context: ./workers/render
+      dockerfile: Dockerfile
+    container_name: affiliate-worker-render
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - WORKER_TYPE=render
+      - MAX_CONCURRENT_JOBS=2
+    volumes:
+      - ./workers/render:/app
+      - ./videos:/app/videos
+      - ./thumbnails:/app/thumbnails
+      - ./subtitles:/app/subtitles
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - affiliate-network
+    deploy:
+      replicas: 2
+
+  # ==================== WORKER UPLOAD ====================
+  worker-upload:
+    build:
+      context: ./workers/upload
+      dockerfile: Dockerfile
+    container_name: affiliate-worker-upload
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TIKTOK_USERNAME=${TIKTOK_USERNAME}
+      - TIKTOK_PASSWORD=${TIKTOK_PASSWORD}
+      - INSTAGRAM_USERNAME=${INSTAGRAM_USERNAME}
+      - INSTAGRAM_PASSWORD=${INSTAGRAM_PASSWORD}
+      - WORKER_TYPE=upload
+      - MAX_CONCURRENT_JOBS=3
+    volumes:
+      - ./workers/upload:/app
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+      - browserless-1
+      - browserless-2
+      - browserless-3
+    networks:
+      - affiliate-network
+    deploy:
+      replicas: 2
+
+  # ==================== WORKER MEDIA ====================
+  worker-media:
+    build:
+      context: ./workers/media
+      dockerfile: Dockerfile
+    container_name: affiliate-worker-media
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY}
+      - WORKER_TYPE=media
+      - MAX_CONCURRENT_JOBS=5
+    volumes:
+      - ./workers/media:/app
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - affiliate-network
+    deploy:
+      replicas: 2
+
+  # ==================== WORKER ANALYTICS ====================
+  worker-analytics:
+    build:
+      context: ./workers/analytics
+      dockerfile: Dockerfile
+    container_name: affiliate-worker-analytics
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TIKTOK_API_KEY=${TIKTOK_API_KEY}
+      - INSTAGRAM_API_KEY=${INSTAGRAM_API_KEY}
+      - WORKER_TYPE=analytics
+      - MAX_CONCURRENT_JOBS=5
+    volumes:
+      - ./workers/analytics:/app
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - affiliate-network
+
+  # ==================== BROWSERLESS INSTANCES ====================
+  browserless-1:
+    image: browserless/chrome:latest
+    container_name: affiliate-browserless-1
+    restart: unless-stopped
+    ports:
+      - "9100:3000"
+    environment:
+      - MAX_CONCURRENT_SESSIONS=5
+      - CONNECTION_TIMEOUT=60000
+      - MAX_QUEUE_LENGTH=10
+    networks:
+      - affiliate-network
+
+  browserless-2:
+    image: browserless/chrome:latest
+    container_name: affiliate-browserless-2
+    restart: unless-stopped
+    ports:
+      - "9101:3000"
+    environment:
+      - MAX_CONCURRENT_SESSIONS=5
+      - CONNECTION_TIMEOUT=60000
+      - MAX_QUEUE_LENGTH=10
+    networks:
+      - affiliate-network
+
+  browserless-3:
+    image: browserless/chrome:latest
+    container_name: affiliate-browserless-3
+    restart: unless-stopped
+    ports:
+      - "9102:3000"
+    environment:
+      - MAX_CONCURRENT_SESSIONS=5
+      - CONNECTION_TIMEOUT=60000
+      - MAX_QUEUE_LENGTH=10
+    networks:
+      - affiliate-network
+
+  # ==================== QDRANT ====================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: affiliate-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    networks:
+      - affiliate-network
+
+  # ==================== OLLAMA ====================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: affiliate-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - affiliate-network
+
+  # ==================== OPEN WEBUI ====================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: affiliate-open-webui
+    restart: unless-stopped
+    ports:
+      - "3002:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    volumes:
+      - ./data/open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openwebui.rule=Host(`openwebui.${DOMAIN}`)"
+      - "traefik.http.routers.openwebui.tls=true"
+      - "traefik.http.routers.openwebui.tls.certresolver=myresolver"
+      - "traefik.http.services.openwebui.loadbalancer.server.port=8080"
+
+  # ==================== PROMETHEUS ====================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: affiliate-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./data/prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - affiliate-network
+
+  # ==================== GRAFANA ====================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: affiliate-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # ==================== LOKI ====================
+  loki:
+    image: grafana/loki:latest
+    container_name: affiliate-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./config/loki/loki.yml:/etc/loki/local-config.yaml
+      - ./data/loki:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - affiliate-network
+
+  # ==================== PROMTAIL ====================
+  promtail:
+    image: grafana/promtail:latest
+    container_name: affiliate-promtail
+    restart: unless-stopped
+    volumes:
+      - ./config/promtail/promtail.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/affiliate
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - affiliate-network
+
+  # ==================== UPTIME KUMA ====================
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: affiliate-uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "3003:3001"
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    networks:
+      - affiliate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.uptime.rule=Host(`uptime.${DOMAIN}`)"
+      - "traefik.http.routers.uptime.tls=true"
+      - "traefik.http.routers.uptime.tls.certresolver=myresolver"
+      - "traefik.http.services.uptime.loadbalancer.server.port=3001"
+
+networks:
+  affiliate-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres:
+  redis:
+  qdrant:
+  n8n:
+  portainer:
+  grafana:
+  prometheus:
+  loki:
+  ollama:
+  open-webui:
+  uptime-kuma:
