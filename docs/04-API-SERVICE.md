@@ -5,7 +5,7 @@ Dokumentasi lengkap untuk FastAPI service yang berfungsi sebagai API layer utama
 ## 🏗️ Arsitektur API
 
 ```
-n8n → FastAPI → Database/Redis/MinIO
+n8n → FastAPI → Database/Redis
          ↓
     Business Logic
          ↓
@@ -24,7 +24,6 @@ api/
 │   ├── config.py            # Configuration management
 │   ├── database.py          # Database connection
 │   ├── redis.py             # Redis connection
-│   ├── minio.py             # MinIO client
 │   ├── models/              # SQLAlchemy models
 │   │   ├── __init__.py
 │   │   ├── product.py
@@ -116,7 +115,6 @@ psycopg2-binary==2.9.9
 alembic==1.13.0
 redis==5.0.1
 celery==5.3.4
-minio==7.2.0
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
@@ -744,4 +742,3 @@ curl http://localhost:8000/metrics
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
 - [Redis Documentation](https://redis.io/docs/)
-- [MinIO Documentation](https://docs.min.io/)

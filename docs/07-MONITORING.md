@@ -662,11 +662,6 @@ Tambahkan monitor untuk setiap service:
 - Port: 6379
 - Interval: 60 seconds
 
-**MinIO**
-- Type: HTTP
-- URL: http://minio:9000/minio/health/live
-- Interval: 60 seconds
-
 **Grafana**
 - Type: HTTP
 - URL: http://grafana:3000/api/health

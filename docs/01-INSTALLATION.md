@@ -211,7 +211,7 @@ cp .env.example .env
 nano .env
 ```
 
-Isi semua required variables (lihat [Environment Setup](03-ENVIRONMENT.md) untuk detail lengkap):
+Isi semua required variables (lihat .env.example untuk detail lengkap):
 
 ```bash
 # Basic Configuration
